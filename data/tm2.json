@@ -1,0 +1,67 @@
+[
+  {
+    "id": "1564853364",
+    "title": "Burning sensation of shoulder disorder (TM2)",
+    "system": "http://id.who.int/icd/release/11/mms/tm2"
+  },
+  {
+    "id": "1249767098",
+    "title": "Eye disorders (TM2)",
+    "system": "http://id.who.int/icd/release/11/mms/tm2"
+  },
+  {
+    "id": "1874623910",
+    "title": "Inflammatory eye disorder (TM2)",
+    "system": "http://id.who.int/icd/release/11/mms/tm2"
+  },
+  {
+    "id": "9928341054",
+    "title": "Dry eye disorder (TM2)",
+    "system": "http://id.who.int/icd/release/11/mms/tm2"
+  },
+  {
+    "id": "8849201943",
+    "title": "Bloodshot eye disorder (TM2)",
+    "system": "http://id.who.int/icd/release/11/mms/tm2"
+  },
+  {
+    "id": "7712903841",
+    "title": "Conjunctivitis disorder (TM2)",
+    "system": "http://id.who.int/icd/release/11/mms/tm2"
+  },
+  {
+    "id": "4482910384",
+    "title": "Loose stool pattern disorder (TM2)",
+    "system": "http://id.who.int/icd/release/11/mms/tm2"
+  },
+  {
+    "id": "2201948271",
+    "title": "Frozen shoulder disorder (TM2)",
+    "system": "http://id.who.int/icd/release/11/mms/tm2"
+  },
+  {
+    "id": "3301928472",
+    "title": "Inflammatory bowel disorder (TM2)",
+    "system": "http://id.who.int/icd/release/11/mms/tm2"
+  },
+  {
+    "id": "5501928374",
+    "title": "Hard swelling of eyelid disorder (TM2)",
+    "system": "http://id.who.int/icd/release/11/mms/tm2"
+  },
+  {
+    "id": "6601928374",
+    "title": "Headache pattern disorder (TM2)",
+    "system": "http://id.who.int/icd/release/11/mms/tm2"
+  },
+  {
+    "id": "7701928374",
+    "title": "Fever pattern disorder (TM2)",
+    "system": "http://id.who.int/icd/release/11/mms/tm2"
+  },
+  {
+    "id": "8801928374",
+    "title": "Cough pattern disorder (TM2)",
+    "system": "http://id.who.int/icd/release/11/mms/tm2"
+  }
+]

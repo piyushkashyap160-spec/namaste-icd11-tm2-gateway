@@ -1,0 +1,56 @@
+[
+  {
+    "code": "SAT-D.8",
+    "display": "aMsadAhaH",
+    "definition": "burning in shoulder",
+    "terminology": "SAT-D"
+  },
+  {
+    "code": "SAT-D.51",
+    "display": "akasmAt SithilamalapravRuttiH",
+    "definition": "sudden onset of loose stools",
+    "terminology": "SAT-D"
+  },
+  {
+    "code": "SAT-D.12",
+    "display": "netrarogaH",
+    "definition": "eye diseases",
+    "terminology": "SAT-D"
+  },
+  {
+    "code": "SAT-D.14",
+    "display": "netradAhaH",
+    "definition": "inflammation of eyes",
+    "terminology": "SAT-D"
+  },
+  {
+    "code": "SAT-D.99",
+    "display": "aMsa mathana vat vyathA",
+    "definition": "feeling as if shoulder is being churned",
+    "terminology": "SAT-D"
+  },
+  {
+    "code": "SAT-D.20",
+    "display": "SiraHSUlaH",
+    "definition": "headache and pain in skull",
+    "terminology": "SAT-D"
+  },
+  {
+    "code": "SAT-D.33",
+    "display": "jvaraH",
+    "definition": "fever with elevated body temperature",
+    "terminology": "SAT-D"
+  },
+  {
+    "code": "SAT-D.45",
+    "display": "kAsaH",
+    "definition": "coughing disorder",
+    "terminology": "SAT-D"
+  },
+  {
+    "code": "SAT-D.60",
+    "display": "tvagrotra",
+    "definition": "proper functioning of eyes or sense organs",
+    "terminology": "SAT-D"
+  }
+]
