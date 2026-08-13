@@ -1,127 +1,192 @@
 import React, { useState } from 'react';
 import { translateFhir } from '../services/api';
-import { FileCode2, Play, CheckCircle2, AlertCircle } from 'lucide-react';
 
-const SAMPLES = {
-  sat8: {
-    resourceType: "Parameters",
-    parameter: [
-      {
-        name: "code",
-        valueCoding: {
-          system: "http://namaste.gov.in/sat-d",
-          code: "SAT-D.8",
-          display: "aMsadAhaH"
-        }
-      }
-    ]
-  },
-  sat51: {
-    resourceType: "Parameters",
-    parameter: [
-      {
-        name: "code",
-        valueCoding: {
-          system: "http://namaste.gov.in/sat-d",
-          code: "SAT-D.51",
-          display: "akasmAt SithilamalapravRuttiH"
-        }
-      }
-    ]
-  },
-  sat12: {
-    resourceType: "Parameters",
-    parameter: [
-      {
-        name: "code",
-        valueCoding: {
-          system: "http://namaste.gov.in/sat-d",
-          code: "SAT-D.12",
-          display: "netrarogaH"
-        }
-      }
-    ]
-  }
+const SAMPLE_PAYLOAD = {
+  resourceType: 'Parameters',
+  parameter: [
+    {
+      name: 'code',
+      valueCoding: {
+        system: 'http://namaste.gov.in/sat-d',
+        code: 'SAT-D.8',
+        display: 'aMsadAhaH',
+      },
+    },
+  ],
 };
 
 export default function FhirTesterView() {
-  const [jsonInput, setJsonInput] = useState(JSON.stringify(SAMPLES.sat8, null, 2));
-  const [jsonOutput, setJsonOutput] = useState(null);
+  const [payload, setPayload] = useState(JSON.stringify(SAMPLE_PAYLOAD, null, 2));
+  const [response, setResponse] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [parseError, setParseError] = useState(null);
 
-  const handleTest = async () => {
-    setLoading(true);
+  const handleSubmit = async () => {
     setError(null);
+    setParseError(null);
+    let parsed;
     try {
-      const parsed = JSON.parse(jsonInput);
-      const res = await translateFhir(parsed);
-      setJsonOutput(res);
+      parsed = JSON.parse(payload);
+    } catch {
+      setParseError('Invalid JSON payload');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const data = await translateFhir(parsed);
+      setResponse(data);
     } catch (err) {
-      setError(err.message);
-      setJsonOutput(null);
+      setError(err.message || 'Request failed');
     } finally {
       setLoading(false);
     }
   };
 
-  const loadSample = (sampleKey) => {
-    setJsonInput(JSON.stringify(SAMPLES[sampleKey], null, 2));
+  const loadPreset = (code, display) => {
+    const preset = {
+      resourceType: 'Parameters',
+      parameter: [
+        {
+          name: 'code',
+          valueCoding: {
+            system: 'http://namaste.gov.in/sat-d',
+            code,
+            display,
+          },
+        },
+      ],
+    };
+    setPayload(JSON.stringify(preset, null, 2));
+    setResponse(null);
+    setError(null);
   };
+
+  const PRESETS = [
+    { code: 'SAT-D.8', display: 'aMsadAhaH', label: 'Shoulder burn' },
+    { code: 'SAT-D.51', display: 'akasmAt SithilamalapravRuttiH', label: 'Loose stools' },
+    { code: 'SAT-D.12', display: 'netrarogaH', label: 'Eye disease' },
+    { code: 'SAT-D.99', display: 'aMsa mathana vat vyathA', label: 'No candidate' },
+  ];
+
+  const matched = response?.parameter?.[0]?.valueBoolean;
 
   return (
     <div>
-      <div className="glass-panel" style={{ padding: '20px', marginBottom: '24px', display: 'flex', gap: '12px', alignItems: 'center' }}>
-        <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)', fontWeight: 600 }}>Load Sample Request:</span>
-        <button className="btn btn-secondary" onClick={() => loadSample('sat8')}>SAT-D.8 (Shoulder Burning)</button>
-        <button className="btn btn-secondary" onClick={() => loadSample('sat51')}>SAT-D.51 (Loose Stools)</button>
-        <button className="btn btn-secondary" onClick={() => loadSample('sat12')}>SAT-D.12 (Eye Diseases)</button>
+      <div className="disclaimer-banner">
+        <span style={{ fontSize: 16, flexShrink: 0 }}>ℹ</span>
+        <div>
+          Send a <strong>FHIR R4 Parameters</strong> resource with a NAMASTE SAT-D coding.
+          The gateway returns a <strong>$translate</strong> response with match result and candidate TM2 coding.
+        </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
+      {/* Presets */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 18, flexWrap: 'wrap' }}>
+        {PRESETS.map(p => (
+          <button
+            key={p.code}
+            className="btn btn-secondary"
+            style={{ padding: '7px 14px', fontSize: '0.8rem' }}
+            onClick={() => loadPreset(p.code, p.display)}
+          >
+            {p.code} — {p.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="fhir-layout">
         {/* Request Panel */}
-        <div className="glass-panel" style={{ padding: '24px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-            <h3 style={{ fontSize: '1.1rem', fontWeight: 700 }}>FHIR Request Payload (POST /fhir/$translate)</h3>
-            <button className="btn" onClick={handleTest} disabled={loading}>
-              <Play size={14} />
-              {loading ? 'Executing...' : 'Execute'}
+        <div>
+          <div className="glass-panel" style={{ padding: '20px 22px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <div>
+                <div className="section-title">POST /fhir/$translate</div>
+                <div className="section-subtitle">FHIR R4 Parameters resource</div>
+              </div>
+              <span className="method-badge method-post">POST</span>
+            </div>
+
+            {parseError && (
+              <div style={{ padding: '10px 14px', background: 'rgba(244,63,94,0.08)', border: '1px solid rgba(244,63,94,0.25)', borderRadius: 8, marginBottom: 12, color: 'var(--rose)', fontSize: '0.8rem' }}>
+                ⚠ {parseError}
+              </div>
+            )}
+
+            <textarea
+              id="fhir-payload-input"
+              value={payload}
+              onChange={e => setPayload(e.target.value)}
+              style={{
+                width: '100%',
+                minHeight: '280px',
+                background: 'var(--bg-code)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: 10,
+                padding: '14px 16px',
+                color: '#a5f3fc',
+                fontFamily: 'var(--mono)',
+                fontSize: '0.82rem',
+                lineHeight: 1.6,
+                resize: 'vertical',
+                outline: 'none',
+              }}
+              onFocus={e => { e.target.style.borderColor = 'var(--cyan)'; }}
+              onBlur={e => { e.target.style.borderColor = 'var(--border-subtle)'; }}
+            />
+
+            <button
+              id="fhir-send-btn"
+              className="btn"
+              style={{ marginTop: 14, width: '100%', justifyContent: 'center' }}
+              onClick={handleSubmit}
+              disabled={loading}
+            >
+              <span>⬡</span>
+              {loading ? 'Translating…' : 'Send $translate Request'}
             </button>
           </div>
-          <textarea
-            style={{
-              width: '100%',
-              height: '380px',
-              background: 'rgba(10, 14, 23, 0.9)',
-              border: '1px solid var(--border-glow)',
-              borderRadius: '12px',
-              padding: '16px',
-              color: '#a5f3fc',
-              fontFamily: 'var(--font-mono)',
-              fontSize: '0.85rem',
-              resize: 'none'
-            }}
-            value={jsonInput}
-            onChange={(e) => setJsonInput(e.target.value)}
-          />
         </div>
 
         {/* Response Panel */}
-        <div className="glass-panel" style={{ padding: '24px' }}>
-          <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '16px' }}>FHIR Response Parameters</h3>
-          {error && (
-            <div style={{ color: 'var(--accent-rose)', display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <AlertCircle size={18} />
-              <span>{error}</span>
+        <div>
+          <div className="glass-panel" style={{ padding: '20px 22px', minHeight: '200px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <div>
+                <div className="section-title">Response</div>
+                <div className="section-subtitle">FHIR Parameters · JSON</div>
+              </div>
+              {response && (
+                <span className={matched ? 'badge badge-high' : 'badge badge-none'}>
+                  {matched ? '✓ MATCH' : '✗ NO MATCH'}
+                </span>
+              )}
             </div>
-          )}
-          {jsonOutput ? (
-            <pre style={{ height: '380px' }}>{JSON.stringify(jsonOutput, null, 2)}</pre>
-          ) : !error && (
-            <div style={{ color: 'var(--text-dim)', textAlign: 'center', marginTop: '140px' }}>
-              Click 'Execute' to submit FHIR $translate operation.
-            </div>
-          )}
+
+            {error && (
+              <div style={{ padding: '14px', background: 'rgba(244,63,94,0.08)', border: '1px solid rgba(244,63,94,0.25)', borderRadius: 10, color: 'var(--rose)', fontSize: '0.875rem' }}>
+                ⚠ {error}
+              </div>
+            )}
+
+            {loading && (
+              <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--text-secondary)' }}>
+                <div className="spinner" style={{ width: 24, height: 24, margin: '0 auto 10px auto' }} />
+                Processing FHIR translation…
+              </div>
+            )}
+
+            {response && !loading && (
+              <pre>{JSON.stringify(response, null, 2)}</pre>
+            )}
+
+            {!response && !loading && !error && (
+              <div style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '0.875rem' }}>
+                Send a request to see the FHIR response
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

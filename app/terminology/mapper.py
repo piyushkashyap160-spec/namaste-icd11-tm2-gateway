@@ -1,4 +1,4 @@
-﻿from typing import List, Dict, Set, Tuple, Optional
+from typing import List, Dict, Set, Tuple, Optional
 import logging
 from app.schemas import (
     NamasteConcept,
@@ -16,12 +16,25 @@ logger = logging.getLogger(__name__)
 # Clinical Knowledge Dictionaries for Semantic Extraction
 ANATOMY_VOCAB = {
     "shoulder", "eye", "eyelid", "skull", "head", "bowel",
-    "sense organ", "organ", "skin", "joint", "chest", "arm", "leg"
+    "sense organ", "organ", "skin", "joint", "chest", "arm", "leg", "limb", "muscle", "bone", "neck", "throat"
+}
+
+# Anatomy groupings: for a query anatomy, list permitted candidate anatomy terms that are clinically
+# valid supersets or anatomically-associated regions. This prevents false rejections like
+# 'shoulder' (a joint) against 'joint disorders', while still blocking cross-system mismatches.
+ANATOMY_COMPATIBLE_GROUPS = {
+    "shoulder": {"shoulder", "joint", "muscle", "bone", "arm", "limb"},
+    "eye": {"eye", "eyelid"},
+    "head": {"head", "skull"},
+    "bowel": {"bowel"},
+    "joint": {"joint", "shoulder", "arm", "leg", "limb", "bone", "muscle"},
+    "muscle": {"muscle", "joint", "shoulder", "arm", "leg"},
+    "bone": {"bone", "joint", "muscle"},
 }
 
 SYMPTOM_VOCAB = {
     "burning", "pain", "inflammation", "inflammatory", "fever",
-    "cough", "headache", "swelling", "churned"
+    "cough", "headache", "swelling", "churned", "sensation", "discomfort"
 }
 
 QUALITY_VOCAB = {
@@ -43,6 +56,50 @@ GENERIC_VOCAB = {
 
 FUNCTIONAL_VOCAB = {
     "functioning", "proper functioning", "function", "healthy state", "sense organs"
+}
+
+# Tiered symptom families.
+#
+# EXACT_SYNONYMS: clinically established synonyms (e.g. pyrexia = fever).
+#   Matches here count as a strong clinical agreement, equivalent to an exact match.
+#
+# RELATED_SYMPTOMS: sensory/quality relatives that share a clinical domain but
+#   are NOT equivalent (e.g. burning ≠ inflammation, burning ≠ pain as diseases).
+#   Matches here yield only weak/partial evidence and CANNOT on their own
+#   produce HIGH confidence.  They do, however, prevent Rule B from hard-rejecting
+#   a candidate that is otherwise anatomically consistent.
+#
+# IMPORTANT: burning is NOT a synonym of inflammation or pain.
+# Burning is a sensory quality; pain is a nociceptive symptom; inflammation
+# is a pathological process.  They are related concepts, not equivalents.
+
+EXACT_SYNONYMS: Dict[str, Set[str]] = {
+    "burning":      {"burning"},
+    "pain":         {"pain", "ache"},
+    "inflammation": {"inflammation", "inflammatory"},
+    "fever":        {"fever", "pyrexia"},
+    "headache":     {"headache", "cephalalgia", "migraine"},
+    "cough":        {"cough", "coughing"},
+    "swelling":     {"swelling", "oedema", "edema"},
+}
+
+RELATED_SYMPTOMS: Dict[str, Set[str]] = {
+    # burning → pain and heat are related sensory qualities; inflammation is related pathology
+    "burning":      {"pain", "sensation", "discomfort", "heat", "inflammation"},
+    # pain → burning and discomfort are related but not equivalent
+    "pain":         {"burning", "discomfort", "sensation"},
+    # inflammation → swelling and redness are related signs but not the symptom itself
+    "inflammation": {"swelling", "redness", "burning"},
+    "fever":        {"temperature", "elevated temperature"},
+    "headache":     set(),
+    "cough":        set(),
+    "swelling":     {"inflammation"},
+}
+
+# Backward-compat alias: flat family = synonyms ∪ related (for Rule B)
+CLINICAL_SYMPTOM_FAMILIES: Dict[str, Set[str]] = {
+    k: EXACT_SYNONYMS.get(k, {k}) | RELATED_SYMPTOMS.get(k, set())
+    for k in set(list(EXACT_SYNONYMS) + list(RELATED_SYMPTOMS))
 }
 
 
@@ -133,37 +190,116 @@ def apply_hard_rejection_rules(
 
     # Rule A: Explicit anatomy conflict
     # E.g. Query has shoulder, candidate has eye/bowel but not shoulder
+    # We allow anatomically-compatible regions (e.g. shoulder -> joint/muscle accepted)
     if query_feat["anatomy"]:
         for query_anat in query_feat["anatomy"]:
-            if cand_feat["anatomy"] and query_anat not in cand_feat["anatomy"]:
-                return True, f"Anatomy conflict: query specifies {query_anat} but candidate specifies {cand_feat['anatomy']}"
+            if cand_feat["anatomy"]:
+                compatible = ANATOMY_COMPATIBLE_GROUPS.get(query_anat, {query_anat})
+                if not cand_feat["anatomy"].intersection(compatible):
+                    return True, f"Anatomy conflict: query specifies {query_anat} but candidate specifies {sorted(cand_feat['anatomy'])}"
 
-    # Rule B: Explicit symptom absent from candidate
-    # E.g. "burning shoulder" must not map to candidate lacking burning (like Frozen shoulder)
+    # Rule B: Symptom guard
     #
-    # Applies uniformly to any symptom in SYMPTOM_VOCAB, not just a
-    # hardcoded subset -- a query naming any specific symptom that the
-    # candidate shares none of is rejected the same way regardless of
-    # which symptom word was used.
+    # Rejection hierarchy (most to least restrictive):
+    #   1. If query has an unmatched "churned" sensation → always reject (no clinical analog)
+    #   2. If candidate has an INCOMPATIBLE quality that directly contradicts the query symptom
+    #      (e.g. query=burning, candidate has only "frozen") → reject unless anatomy matches exactly
+    #      AND another symptom/quality in the candidate is at least a related concept.
+    #   3. If NO symptom evidence at all (exact, synonym, related, or quality), AND anatomy is
+    #      also absent → reject.
+    #
+    # Anatomy-compatible match keeps a candidate ALIVE (not rejected) but NEVER substitutes
+    # for symptom evidence in scoring or confidence.
     if query_feat["symptoms"]:
-        matched_symptoms = query_feat["symptoms"].intersection(cand_feat["symptoms"])
-        if not matched_symptoms:
-            return True, f"Explicit query symptom {query_feat['symptoms']} missing in candidate {cand_feat['symptoms']}"
+        # Categorise matches
+        exact_symp_match  = bool(query_feat["symptoms"].intersection(cand_feat["symptoms"]))
+        exact_qual_match  = bool(query_feat["symptoms"].intersection(cand_feat["quality"]))
+
+        synonym_match = False
+        for q_sym in query_feat["symptoms"]:
+            synonyms = EXACT_SYNONYMS.get(q_sym, {q_sym})
+            if synonyms.intersection(cand_feat["symptoms"]) or synonyms.intersection(cand_feat["quality"]):
+                synonym_match = True
+                break
+
+        related_match = False
+        for q_sym in query_feat["symptoms"]:
+            related = RELATED_SYMPTOMS.get(q_sym, set())
+            if related.intersection(cand_feat["symptoms"]) or related.intersection(cand_feat["quality"]):
+                related_match = True
+                break
+
+        # Hard guard: "churned" sensation has no TM2 equivalent — always reject
+        unmatched_churned = bool(query_feat["symptoms"].intersection({"churned"}))
+        if unmatched_churned:
+            return True, "Churned sensation has no valid TM2 clinical analog"
+
+        # Anatomy coverage
+        anatomy_exact_match = bool(
+            query_feat["anatomy"] and query_feat["anatomy"].intersection(cand_feat["anatomy"])
+        )
+        anatomy_compatible_match = False
+        for q_anat in query_feat["anatomy"]:
+            compatible = ANATOMY_COMPATIBLE_GROUPS.get(q_anat, {q_anat})
+            if cand_feat["anatomy"].intersection(compatible):
+                anatomy_compatible_match = True
+                break
+        anatomy_covered = anatomy_exact_match or anatomy_compatible_match
+
+        # Incompatibility check: candidate has a quality that DIRECTLY conflicts with
+        # the query symptom (e.g. burning vs frozen).  Only reject if anatomy also
+        # doesn't match exactly or there is no related symptom evidence at all.
+        conflicting_qualities = {
+            "burning": {"frozen", "cold", "icy"},
+            "fever":   {"frozen", "cold"},
+        }
+        has_conflict = False
+        for q_sym in query_feat["symptoms"]:
+            conflicts = conflicting_qualities.get(q_sym, set())
+            if conflicts.intersection(cand_feat["quality"]):
+                # Conflict found — only hard-reject when anatomy doesn't help AND
+                # there is no related symptom at all
+                if not anatomy_exact_match:
+                    has_conflict = True
+                break
+
+        any_symptom_evidence = (
+            exact_symp_match or exact_qual_match or synonym_match or related_match
+        )
+
+        if has_conflict and not any_symptom_evidence:
+            return (
+                True,
+                f"Symptom conflict: query={sorted(query_feat['symptoms'])} "
+                f"incompatible with candidate quality={sorted(cand_feat['quality'])}",
+            )
+
+        # Final gate: if there is neither symptom evidence NOR anatomy coverage → reject
+        if not any_symptom_evidence and not anatomy_covered:
+            return (
+                True,
+                f"No symptom evidence and no anatomy coverage: "
+                f"query_symptoms={sorted(query_feat['symptoms'])} "
+                f"cand_symptoms={sorted(cand_feat['symptoms'])}",
+            )
 
     # Rule C: Explicit clinical object absent
+    # Only apply when query anatomy is NOT matched - anatomy match already validates the site
     if query_feat["objects"]:
         matched_objects = query_feat["objects"].intersection(cand_feat["objects"])
-        # E.g. "loose stools" (object: stool) must not map to "eyelid"
-        if not matched_objects:
+        anatomy_covered = False
+        for q_anat in query_feat["anatomy"]:
+            compatible = ANATOMY_COMPATIBLE_GROUPS.get(q_anat, {q_anat})
+            if cand_feat["anatomy"].intersection(compatible):
+                anatomy_covered = True
+                break
+        # Only reject on object mismatch when anatomy isn't covered
+        if not matched_objects and not anatomy_covered:
             return True, f"Explicit clinical object {query_feat['objects']} absent from candidate {cand_feat['objects']}"
 
     # Rule D: Generic queries must not map to overly specific diseases with extra non-requested specific qualities
-    # E.g. Query "eye diseases" (generic) vs Candidate "Dry eye disorder" or "Conjunctivitis"
     query_is_pure_generic = bool(query_feat["anatomy"]) and bool(query_feat["generic"]) and not query_feat["symptoms"] and not query_feat["quality"]
     if query_is_pure_generic:
-        # Candidate has specific extra qualities like "dry", "bloodshot", etc.
-        # Checked directly against the candidate's own detected quality
-        # tags, not a set artificially forced non-empty.
         if cand_feat["quality"] and "eye disorders" not in candidate.title.lower():
             return True, "Generic query preferred broad category concept over specific sub-disease"
 
@@ -176,6 +312,23 @@ def score_candidate(
 ) -> float:
     """
     Deterministic scoring engine based on clinical feature overlap.
+
+    Scoring philosophy:
+    - Exact anatomy match:       10 pts
+    - Compatible anatomy match:   4 pts  (partial — shoulder→joint)
+    - Exact symptom match:       12 pts
+    - Exact quality match:        8 pts
+    - Synonym symptom match:      7 pts  (e.g. pain≈ache)
+    - Related symptom match:      3 pts  (e.g. burning→inflammation, weak signal)
+    - Exact object match:        12 pts
+    - Meaningful word overlap:    2 pts each
+    - Exact anatomy set bonus:    6 pts  (sets are identical)
+    - Exact symptom set bonus:    8 pts  (sets are identical)
+    - Exact object set bonus:     6 pts
+    - Strong combined bonus:     10 pts  (exact anatomy AND exact symptom/quality)
+
+    Note: anatomy-compatible match alone CANNOT produce a strong score.
+    Note: a related-symptom match alone contributes only 3 pts — far from HIGH threshold.
     """
     score = 0.0
 
@@ -183,14 +336,47 @@ def score_candidate(
     symp_overlap = len(query_feat["symptoms"].intersection(cand_feat["symptoms"]))
     qual_overlap = len(query_feat["quality"].intersection(cand_feat["quality"]))
     find_overlap = len(query_feat["findings"].intersection(cand_feat["findings"]))
-    obj_overlap = len(query_feat["objects"].intersection(cand_feat["objects"]))
+    obj_overlap  = len(query_feat["objects"].intersection(cand_feat["objects"]))
     func_overlap = len(query_feat["functional"].intersection(cand_feat["functional"]))
 
-    # Base category scoring
+    # Anatomy-compatible (partial) match when exact anatomy is absent
+    anat_compatible_overlap = 0
+    if query_feat["anatomy"] and not anat_overlap:
+        for q_anat in query_feat["anatomy"]:
+            compatible = ANATOMY_COMPATIBLE_GROUPS.get(q_anat, {q_anat})
+            if cand_feat["anatomy"].intersection(compatible):
+                anat_compatible_overlap += 1
+
+    # Symptom synonym match (strong — same clinical meaning)
+    synonym_symp_overlap = 0
+    if query_feat["symptoms"] and not symp_overlap:
+        for q_sym in query_feat["symptoms"]:
+            synonyms = EXACT_SYNONYMS.get(q_sym, {q_sym})
+            if (synonyms - {q_sym}).intersection(cand_feat["symptoms"]) or \
+               (synonyms - {q_sym}).intersection(cand_feat["quality"]):
+                synonym_symp_overlap += 1
+
+    # Symptom related match (weak — related concept, not equivalent)
+    related_symp_overlap = 0
+    if query_feat["symptoms"] and not symp_overlap and not synonym_symp_overlap:
+        for q_sym in query_feat["symptoms"]:
+            related = RELATED_SYMPTOMS.get(q_sym, set())
+            if related.intersection(cand_feat["symptoms"]) or related.intersection(cand_feat["quality"]):
+                related_symp_overlap += 1
+
+    # ── Base scoring ──────────────────────────────────────────────────────────
     if anat_overlap > 0:
         score += 10.0
+    elif anat_compatible_overlap > 0:
+        score += 4.0          # Partial — compatible anatomy, not exact
+
     if symp_overlap > 0:
         score += 12.0
+    elif synonym_symp_overlap > 0:
+        score += 7.0          # Synonym — strong but not exact
+    elif related_symp_overlap > 0:
+        score += 3.0          # Related — weak signal only
+
     if qual_overlap > 0:
         score += 8.0
     if find_overlap > 0:
@@ -200,45 +386,119 @@ def score_candidate(
     if func_overlap > 0:
         score += 10.0
 
-    # General meaningful word overlap (excluding generic filler words)
-    meaningful_query_words = query_feat["all_words"] - GENERIC_VOCAB - TEMPORAL_CONTEXT_VOCAB
-    meaningful_cand_words = cand_feat["all_words"] - GENERIC_VOCAB - TEMPORAL_CONTEXT_VOCAB
-    word_overlap = len(meaningful_query_words.intersection(meaningful_cand_words))
-    score += (word_overlap * 2.0)
+    # Meaningful word overlap (token-level, minus stopwords)
+    meaningful_query = query_feat["all_words"] - GENERIC_VOCAB - TEMPORAL_CONTEXT_VOCAB
+    meaningful_cand  = cand_feat["all_words"]  - GENERIC_VOCAB - TEMPORAL_CONTEXT_VOCAB
+    word_overlap = len(meaningful_query.intersection(meaningful_cand))
+    score += word_overlap * 2.0
 
-    # Exact agreement bonuses
+    # ── Exact-set agreement bonuses ───────────────────────────────────────────
     if query_feat["anatomy"] and query_feat["anatomy"] == cand_feat["anatomy"]:
-        score += 8.0
+        score += 6.0
     if query_feat["symptoms"] and query_feat["symptoms"] == cand_feat["symptoms"]:
-        score += 10.0
-    if query_feat["objects"] and query_feat["objects"] == cand_feat["objects"]:
         score += 8.0
+    if query_feat["objects"] and query_feat["objects"] == cand_feat["objects"]:
+        score += 6.0
 
-    # Strong anatomy + symptom agreement bonus
+    # Strong combined bonus: exact anatomy AND exact symptom/quality agreement
+    # (requires real clinical agreement — compatible anatomy alone does NOT trigger this)
     if anat_overlap > 0 and (symp_overlap > 0 or qual_overlap > 0):
         score += 10.0
 
     return score
 
-def determine_confidence(score: float, query_feat: Dict[str, Set[str]], cand_feat: Dict[str, Set[str]]) -> str:
-    """
-    Determine confidence level based on score and clinical feature agreement.
-    """
-    anat_agree = bool(query_feat["anatomy"].intersection(cand_feat["anatomy"])) if query_feat["anatomy"] else True
-    clinical_agree = bool(
-        query_feat["symptoms"].intersection(cand_feat["symptoms"]) or
-        query_feat["quality"].intersection(cand_feat["quality"]) or
-        query_feat["objects"].intersection(cand_feat["objects"])
-    )
 
-    if score >= 40.0 and anat_agree and clinical_agree:
+def determine_confidence(
+    score: float,
+    query_feat: Dict[str, Set[str]],
+    cand_feat: Dict[str, Set[str]],
+) -> str:
+    """
+    Confidence calibration — conservative by design.
+
+    HIGH:   Requires exact anatomy match AND (exact symptom OR exact quality) match.
+            Score threshold ≥ 40.  A broad symptom-family match is insufficient.
+    MEDIUM: Requires exact anatomy match AND synonym-level symptom agreement,
+            OR exact symptom with at least compatible anatomy.
+            Score threshold ≥ 22.
+    LOW:    Anatomy-only match (symptom absent from candidate), or related-symptom
+            only, or compatible (non-exact) anatomy with synonym symptom.
+            Score threshold ≥ 12.
+    NONE:   Below threshold — not included in results.
+
+    Key rules:
+    - Anatomy-compatible match (shoulder→joint) alone → caps at LOW
+    - Anatomy exact + symptom absent (e.g. SP15 Frozen shoulder for burning) → LOW
+    - Related symptom only (burning→inflammation) → caps at LOW
+    - Synonym symptom + exact anatomy → MEDIUM
+    - Exact symptom + exact anatomy → HIGH (if score ≥ 40)
+    """
+    # Anatomy agreement tier
+    exact_anat = (
+        bool(query_feat["anatomy"].intersection(cand_feat["anatomy"]))
+        if query_feat["anatomy"] else True
+    )
+    compatible_anat = False
+    if not exact_anat and query_feat["anatomy"]:
+        for q_anat in query_feat["anatomy"]:
+            compat = ANATOMY_COMPATIBLE_GROUPS.get(q_anat, {q_anat})
+            if cand_feat["anatomy"].intersection(compat):
+                compatible_anat = True
+                break
+
+    # Symptom agreement tier
+    # NOTE: object overlap (e.g. shoulder in query AND candidate) validates the clinical
+    # SITE but is NOT evidence of symptom equivalence.  It must not elevate confidence
+    # to MEDIUM/HIGH on its own.
+    exact_symp = bool(
+        query_feat["symptoms"].intersection(cand_feat["symptoms"]) or
+        query_feat["quality"].intersection(cand_feat["quality"])
+        # objects intentionally excluded from exact_symp
+    )
+    # Site match: query and candidate share an explicit anatomical object (e.g. shoulder)
+    exact_site = bool(query_feat["objects"].intersection(cand_feat["objects"]))
+
+    synonym_symp = False
+    if not exact_symp:
+        for q_sym in query_feat["symptoms"]:
+            synonyms = EXACT_SYNONYMS.get(q_sym, {q_sym})
+            if (synonyms - {q_sym}).intersection(cand_feat["symptoms"]) or \
+               (synonyms - {q_sym}).intersection(cand_feat["quality"]):
+                synonym_symp = True
+                break
+
+    related_symp = False
+    if not exact_symp and not synonym_symp:
+        for q_sym in query_feat["symptoms"]:
+            related = RELATED_SYMPTOMS.get(q_sym, set())
+            if related.intersection(cand_feat["symptoms"]) or related.intersection(cand_feat["quality"]):
+                related_symp = True
+                break
+
+    # ── Confidence ladder ─────────────────────────────────────────────────────
+    # HIGH: exact anatomy AND exact symptom/quality evidence, score ≥ 40
+    # Object (site) overlap alone is NOT sufficient for HIGH.
+    if score >= 40.0 and exact_anat and exact_symp:
         return "HIGH"
-    elif score >= 25.0 and clinical_agree:
+
+    # MEDIUM: exact anatomy + synonym symptom (strong synonym, not broad family)
+    if score >= 22.0 and exact_anat and synonym_symp:
         return "MEDIUM"
-    elif score >= 15.0:
+    # MEDIUM: exact symptom evidence + at least compatible anatomy
+    if score >= 22.0 and exact_symp and (exact_anat or compatible_anat):
+        return "MEDIUM"
+
+    # LOW: anatomy coverage (exact or compatible) with any symptom signal, OR anatomy-only
+    # This includes the clinically defensible-but-uncertain cases such as:
+    #   - exact anatomy + symptom absent from candidate (different phenotype)
+    #   - compatible anatomy + synonym symptom
+    #   - related symptom only (weak signal)
+    if score >= 12.0 and (exact_anat or compatible_anat):
         return "LOW"
-    else:
-        return "NONE"
+    if score >= 12.0 and related_symp:
+        return "LOW"
+
+    return "NONE"
 
 def get_mapping_for_concept(concept_or_code: str) -> ConceptMappingResponse:
     """
@@ -288,7 +548,10 @@ def get_mapping_for_concept(concept_or_code: str) -> ConceptMappingResponse:
 
             matches.append(CandidateMatch(
                 tm2_id=cand.id,
+                tm2_code=cand.code,
                 tm2_title=cand.title,
+                tm2_system=cand.system,
+                tm2_version=cand.version,
                 score=round(score, 1),
                 confidence=confidence,
                 equivalence="relatedto",

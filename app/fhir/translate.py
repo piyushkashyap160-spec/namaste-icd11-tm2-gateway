@@ -55,27 +55,31 @@ def process_fhir_translate(params: FHIRParameters) -> FHIRParameters:
             ]
         )
 
-    # Take top candidate
-    top_match = mapping_res.matches[0]
-
     response_parameters = [
         FHIRParameter(name="result", valueBoolean=True),
-        FHIRParameter(
-            name="match",
-            part=[
-                FHIRPart(name="equivalence", valueCode=top_match.equivalence),
-                FHIRPart(
-                    name="concept",
-                    valueCoding=FHIRCoding(
-                        system="http://id.who.int/icd/release/11/mms/tm2",
-                        code=top_match.tm2_id,
-                        display=top_match.tm2_title
-                    )
-                )
-            ]
-        ),
-        FHIRParameter(name="disclaimer", valueString=DISCLAIMER_NOTE)
     ]
+
+    for match in mapping_res.matches:
+        response_parameters.append(
+            FHIRParameter(
+                name="match",
+                part=[
+                    FHIRPart(name="equivalence", valueCode=match.equivalence),
+                    FHIRPart(name="confidence", valueCode=match.confidence),
+                    FHIRPart(
+                        name="concept",
+                        valueCoding=FHIRCoding(
+                            system=match.tm2_system,
+                            version=match.tm2_version,
+                            code=match.tm2_code,
+                            display=match.tm2_title
+                        )
+                    )
+                ]
+            )
+        )
+
+    response_parameters.append(FHIRParameter(name="disclaimer", valueString=DISCLAIMER_NOTE))
 
     return FHIRParameters(
         resourceType="Parameters",

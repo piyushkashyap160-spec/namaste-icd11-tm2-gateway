@@ -1,74 +1,93 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { fetchNamasteConcepts } from '../services/api';
-import { Search, ArrowRight, BookOpen } from 'lucide-react';
 
 export default function NamasteSearchView({ onSelectConcept }) {
   const [concepts, setConcepts] = useState([]);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetchNamasteConcepts()
-      .then(data => {
-        setConcepts(data);
-        setLoading(false);
-      })
-      .catch(err => {
-        console.error(err);
-        setLoading(false);
-      });
+      .then(data => setConcepts(data))
+      .catch(() => setConcepts([]))
+      .finally(() => setLoading(false));
   }, []);
 
-  const filtered = concepts.filter(c => 
-    c.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.display.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.definition.toLowerCase().includes(searchTerm.toLowerCase())
+  const filtered = concepts.filter(c =>
+    !query ||
+    c.code.toLowerCase().includes(query.toLowerCase()) ||
+    (c.display || '').toLowerCase().includes(query.toLowerCase()) ||
+    (c.definition || '').toLowerCase().includes(query.toLowerCase())
   );
 
   return (
     <div>
-      <div className="glass-panel" style={{ padding: '20px', marginBottom: '24px' }}>
+      {/* Search bar */}
+      <div className="glass-panel" style={{ padding: '18px 22px', marginBottom: '22px' }}>
         <div className="input-group">
           <input
+            id="namaste-search-input"
             type="text"
             className="form-input"
-            placeholder="Search NAMASTE concepts by code (SAT-D.8), Sanskrit display, or definition..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Filter by code, display, or definition…"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            autoComplete="off"
           />
-          <button className="btn">
-            <Search size={16} />
-            Search
-          </button>
         </div>
       </div>
 
-      {loading ? (
-        <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '40px' }}>Loading catalog...</div>
-      ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))', gap: '20px' }}>
-          {filtered.map(c => (
-            <div key={c.code} className="glass-panel" style={{ padding: '20px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                <span className="badge badge-high">{c.code}</span>
-                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 600 }}>{c.terminology}</span>
-              </div>
-              <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '6px' }}>{c.display}</h3>
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '16px' }}>
-                "{c.definition}"
-              </p>
-              <button 
-                className="btn btn-secondary" 
-                style={{ width: '100%', justifyContent: 'center' }}
-                onClick={() => onSelectConcept(c.code)}
-              >
-                Map to ICD-11 TM2
-                <ArrowRight size={14} />
-              </button>
-            </div>
-          ))}
+      <div className="glass-panel" style={{ overflow: 'hidden' }}>
+        <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div className="section-title">SAT-D Concept Catalog</div>
+          <span className="provenance-badge provenance-local">● LOCAL DEMO</span>
+          <span style={{ marginLeft: 'auto', fontSize: '0.8rem', color: 'var(--text-tertiary)' }}>
+            {loading ? '…' : `${filtered.length} / ${concepts.length} concepts`}
+          </span>
         </div>
-      )}
+
+        {loading ? (
+          <div style={{ padding: '48px', textAlign: 'center', color: 'var(--text-secondary)' }}>
+            <div className="spinner" style={{ width: 24, height: 24, margin: '0 auto 10px auto' }} />
+            Loading NAMASTE concepts…
+          </div>
+        ) : filtered.length === 0 ? (
+          <div style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)' }}>
+            No concepts match "{query}"
+          </div>
+        ) : (
+          <table className="concept-table">
+            <thead>
+              <tr>
+                <th>SAT-D Code</th>
+                <th>Sanskrit Display</th>
+                <th>Clinical Definition (English)</th>
+                <th style={{ textAlign: 'right' }}>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(c => (
+                <tr key={c.code} onClick={() => onSelectConcept(c.code)}>
+                  <td><span className="concept-code">{c.code}</span></td>
+                  <td style={{ fontWeight: 600, fontSize: '0.9rem' }}>{c.display}</td>
+                  <td style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', maxWidth: '380px' }}>
+                    {c.definition || '—'}
+                  </td>
+                  <td style={{ textAlign: 'right' }}>
+                    <button
+                      className="btn btn-secondary"
+                      style={{ padding: '6px 14px', fontSize: '0.78rem' }}
+                      onClick={e => { e.stopPropagation(); onSelectConcept(c.code); }}
+                    >
+                      Map →
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
     </div>
   );
 }

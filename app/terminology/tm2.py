@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import os
@@ -12,6 +12,12 @@ DATA_PATH = (
     Path(__file__).resolve().parent.parent.parent
     / "data"
     / "tm2.json"
+)
+
+WHO_CACHE_PATH = (
+    Path(__file__).resolve().parent.parent.parent
+    / "data"
+    / "who_tm2_cache.json"
 )
 
 WHO_MMS_SYSTEM = "http://id.who.int/icd/release/11/mms"
@@ -342,18 +348,64 @@ def _load_tm2_from_local() -> List[TM2Concept]:
     return concepts
 
 
-async def warm_tm2_cache() -> None:
+def _load_tm2_from_disk_cache() -> List[TM2Concept]:
+    """
+    Load WHO TM2 concepts from persistent disk cache.
+    """
+    if not WHO_CACHE_PATH.exists():
+        raise FileNotFoundError(f"WHO cache file not found: {WHO_CACHE_PATH}")
+
+    with open(WHO_CACHE_PATH, "r", encoding="utf-8") as file:
+        raw_data = json.load(file)
+
+    if not isinstance(raw_data, list):
+        raise ValueError("WHO cache file must contain a JSON list.")
+
+    concepts: List[TM2Concept] = []
+    for item in raw_data:
+        if isinstance(item, dict):
+            concepts.append(TM2Concept(**item))
+
+    return concepts
+
+
+def _save_tm2_to_disk_cache(concepts: List[TM2Concept]) -> None:
+    """
+    Save WHO TM2 concepts to persistent disk cache.
+    """
+    try:
+        data = [concept.model_dump() if hasattr(concept, "model_dump") else concept.dict() for concept in concepts]
+        WHO_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(WHO_CACHE_PATH, "w", encoding="utf-8") as file:
+            json.dump(data, file, indent=2)
+        print(f"[TM2] Saved {len(concepts)} WHO concepts to persistent cache: {WHO_CACHE_PATH}")
+    except Exception as e:
+        print(f"[TM2] Failed to save disk cache: {e}")
+
+
+async def warm_tm2_cache(force_refresh: bool = False) -> None:
     """
     Populate the TM2 cache during FastAPI startup.
 
-    WHO is attempted first.
-
-    If the complete WHO traversal fails, the local snapshot is loaded.
-
-    The active cache is assigned only after a complete dataset has been
-    successfully constructed.
+    1. Persistent WHO disk cache is attempted first (instant startup).
+    2. Live WHO traversal is attempted if disk cache is missing or force_refresh is True.
+    3. Local fallback snapshot is loaded if both WHO sources fail.
     """
     global _tm2_cache, _tm2_source
+
+    if not force_refresh and WHO_CACHE_PATH.exists():
+        try:
+            cached_concepts = _load_tm2_from_disk_cache()
+            if cached_concepts:
+                _tm2_cache = cached_concepts
+                _tm2_source = "who"
+                print(
+                    f"[TM2] WHO persistent disk cache loaded successfully: "
+                    f"{len(cached_concepts)} concepts (release {WHO_RELEASE})."
+                )
+                return
+        except Exception as cache_err:
+            print(f"[TM2] Disk cache load failed: {cache_err}. Attempting live fetch.")
 
     try:
         who_concepts = load_tm2_from_who()
@@ -363,14 +415,15 @@ async def warm_tm2_cache() -> None:
         _tm2_source = "who"
 
         print(
-            f"[TM2] WHO cache loaded successfully: "
+            f"[TM2] WHO live cache loaded successfully: "
             f"{len(who_concepts)} concepts "
             f"(release {WHO_RELEASE})."
         )
+        _save_tm2_to_disk_cache(who_concepts)
 
     except Exception as who_error:
         print(
-            "[TM2] WHO loading failed; using local fallback."
+            "[TM2] WHO live loading failed; checking local fallback."
         )
         print(
             f"[TM2] WHO error: {type(who_error).__name__}: "
@@ -404,6 +457,7 @@ async def warm_tm2_cache() -> None:
                 "WHO loading failed and local fallback could not "
                 "be loaded."
             ) from fallback_error
+
 
 
 def get_tm2_concepts() -> List[TM2Concept]:

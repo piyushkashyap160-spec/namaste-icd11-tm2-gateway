@@ -8,6 +8,39 @@ import FhirTesterView from './components/FhirTesterView';
 import AuditLogsView from './components/AuditLogsView';
 import ApiDocsView from './components/ApiDocsView';
 
+const TAB_META = {
+  dashboard: {
+    eyebrow: 'System Overview',
+    title: 'Dashboard',
+    description: 'Concept counts, validation test suite, and architecture overview',
+  },
+  namaste: {
+    eyebrow: 'Terminology Catalog',
+    title: 'AYUSH NAMASTE Concepts',
+    description: 'SAT-D Ayurvedic terminology catalog — searchable Sanskrit clinical concepts',
+  },
+  mapping: {
+    eyebrow: 'Mapping Engine',
+    title: 'Clinical Terminology Mapping',
+    description: 'Deterministic feature extraction, hard rejection evaluation, and ICD-11 TM2 candidate scoring',
+  },
+  fhir: {
+    eyebrow: 'FHIR R4',
+    title: 'FHIR $translate Tester',
+    description: 'Interactive FHIR Parameters request tester — live $translate API with JSON response',
+  },
+  audit: {
+    eyebrow: 'Compliance',
+    title: 'Audit Trail',
+    description: 'Non-PHI access logs for EHR governance and interoperability compliance',
+  },
+  docs: {
+    eyebrow: 'Developer Reference',
+    title: 'API Documentation',
+    description: 'OpenAPI 3.0 endpoints, JWT auth, FHIR specification, and standards references',
+  },
+};
+
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [selectedConceptCode, setSelectedConceptCode] = useState('SAT-D.8');
@@ -17,40 +50,25 @@ export default function App() {
     setActiveTab('mapping');
   };
 
-  const getTabMetadata = () => {
-    switch (activeTab) {
-      case 'dashboard':
-        return { title: 'Dashboard Overview', description: 'System health, concept counts, and clinical mapping test suite' };
-      case 'namaste':
-        return { title: 'AYUSH NAMASTE Catalog', description: 'Search and inspect supported Ayush SAT-D terminology concepts' };
-      case 'mapping':
-        return { title: 'Candidate Terminology Mapping Engine', description: 'Deterministic clinical feature scoring, hard rejection evaluation, and ICD-11 TM2 candidate matching' };
-      case 'fhir':
-        return { title: 'FHIR R4 $translate Tester', description: 'Interactive FHIR Parameters JSON request/response testing tool' };
-      case 'audit':
-        return { title: 'Audit Trail & Governance', description: 'Non-PHI access logs for EHR compliance and traceability' };
-      case 'docs':
-        return { title: 'API Specifications', description: 'OpenAPI 3.0 & FHIR specification reference' };
-      default:
-        return { title: 'Interoperability Gateway', description: '' };
-    }
-  };
-
-  const { title, description } = getTabMetadata();
+  const meta = TAB_META[activeTab] || TAB_META.dashboard;
 
   return (
     <div className="app-layout">
       <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
-      
+
       <main className="main-content">
-        <Header title={title} description={description} />
-        
-        {activeTab === 'dashboard' && <DashboardView onSelectConcept={handleSelectConcept} />}
-        {activeTab === 'namaste' && <NamasteSearchView onSelectConcept={handleSelectConcept} />}
+        <Header eyebrow={meta.eyebrow} title={meta.title} description={meta.description} />
+
+        {activeTab === 'dashboard' && (
+          <DashboardView onSelectConcept={handleSelectConcept} />
+        )}
+        {activeTab === 'namaste' && (
+          <NamasteSearchView onSelectConcept={handleSelectConcept} />
+        )}
         {activeTab === 'mapping' && (
-          <ConceptMappingView 
-            selectedCode={selectedConceptCode} 
-            onCodeChange={setSelectedConceptCode} 
+          <ConceptMappingView
+            selectedCode={selectedConceptCode}
+            onCodeChange={setSelectedConceptCode}
           />
         )}
         {activeTab === 'fhir' && <FhirTesterView />}

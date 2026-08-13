@@ -153,8 +153,9 @@ class FakeWHOClient:
 
 
 @pytest.fixture(autouse=True)
-def reset_tm2_cache():
-    """Every test starts and ends with a clean module-level cache."""
+def reset_tm2_cache(tmp_path, monkeypatch):
+    """Every test starts and ends with a clean module-level cache and isolated cache path."""
+    monkeypatch.setattr(tm2, "WHO_CACHE_PATH", tmp_path / "test_who_cache.json")
     tm2.clear_tm2_cache()
     yield
     tm2.clear_tm2_cache()

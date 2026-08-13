@@ -1,6 +1,13 @@
-from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime
+
+try:
+    from pydantic import BaseModel, Field, ConfigDict
+    _PYDANTIC_HAS_CONFIGDICT = True
+except ImportError:
+    from pydantic import BaseModel, Field
+    ConfigDict = None
+    _PYDANTIC_HAS_CONFIGDICT = False
 
 # Auth Schemas
 class DevTokenRequest(BaseModel):
@@ -54,7 +61,10 @@ class ClinicalEvidence(BaseModel):
 # Candidate Match Schema
 class CandidateMatch(BaseModel):
     tm2_id: str
+    tm2_code: Optional[str] = None
     tm2_title: str
+    tm2_system: Optional[str] = None
+    tm2_version: Optional[str] = None
     score: float
     confidence: str # HIGH, MEDIUM, LOW, NONE
     equivalence: str = "relatedto"
@@ -83,5 +93,6 @@ class AuditLogResponse(BaseModel):
     result: str
     notes: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    if _PYDANTIC_HAS_CONFIGDICT:
+        model_config = ConfigDict(from_attributes=True)
+

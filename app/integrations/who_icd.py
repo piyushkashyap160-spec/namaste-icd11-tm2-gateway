@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import logging
 import os
@@ -49,6 +49,7 @@ class WHOICDClient:
             "en",
         )
 
+        self._session = requests.Session()
         self._access_token: Optional[str] = None
         self._token_expires_at: float = 0.0
 
@@ -73,7 +74,7 @@ class WHOICDClient:
         ):
             return self._access_token
 
-        response = requests.post(
+        response = self._session.post(
             self.token_url,
             data={
                 "grant_type": "client_credentials",
@@ -136,11 +137,12 @@ class WHOICDClient:
 
         for attempt in range(1, WHO_API_MAX_RETRIES + 1):
             try:
-                response = requests.get(
+                response = self._session.get(
                     url,
                     headers=self._headers(),
                     timeout=30,
                 )
+
 
                 if 400 <= response.status_code < 500:
                     # Client errors are not retried.

@@ -1,171 +1,211 @@
 import React, { useState, useEffect } from 'react';
 import { getConceptMapping, translateFhir } from '../services/api';
-import { Search, GitMerge, AlertTriangle, ShieldCheck, ArrowDown, Check, XCircle } from 'lucide-react';
+
+const ConfidenceBadge = ({ conf }) => {
+  const map = {
+    HIGH: ['badge badge-high', 'HIGH'],
+    MEDIUM: ['badge badge-medium', 'MEDIUM'],
+    LOW: ['badge badge-low', 'LOW'],
+  };
+  const [cls, label] = map[conf] || ['badge badge-none', 'NONE'];
+  return <span className={cls}>{label} CONFIDENCE</span>;
+};
+
+const ScoreBar = ({ score, max = 100 }) => {
+  const pct = Math.min(100, (score / max) * 100);
+  return (
+    <div className="score-bar-wrap">
+      <div className="score-bar-label">
+        <span>Clinical Match Score</span>
+        <span style={{ color: 'var(--cyan)', fontWeight: 700 }}>{score}</span>
+      </div>
+      <div className="score-bar-track">
+        <div className="score-bar-fill" style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+};
 
 export default function ConceptMappingView({ selectedCode, onCodeChange }) {
   const [inputCode, setInputCode] = useState(selectedCode || 'SAT-D.8');
   const [result, setResult] = useState(null);
   const [fhirResponse, setFhirResponse] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
-  const runMapping = async (codeToRun) => {
+  const runMapping = async (code) => {
     setLoading(true);
     setFhirResponse(null);
+    setError(null);
     try {
-      const data = await getConceptMapping(codeToRun);
+      const data = await getConceptMapping(code);
       setResult(data);
-      
-      // Auto fetch FHIR translate preview for top match if available
+
       if (data.namaste) {
         const fhirData = await translateFhir({
-          resourceType: "Parameters",
+          resourceType: 'Parameters',
           parameter: [
             {
-              name: "code",
+              name: 'code',
               valueCoding: {
-                system: "http://namaste.gov.in/sat-d",
+                system: 'http://namaste.gov.in/sat-d',
                 code: data.namaste.code,
-                display: data.namaste.display
-              }
-            }
-          ]
+                display: data.namaste.display,
+              },
+            },
+          ],
         });
         setFhirResponse(fhirData);
       }
     } catch (err) {
-      console.error(err);
+      setError(err.message || 'Mapping failed');
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    if (selectedCode) {
-      setInputCode(selectedCode);
-      runMapping(selectedCode);
-    } else {
-      runMapping('SAT-D.8');
-    }
+    const code = selectedCode || 'SAT-D.8';
+    setInputCode(code);
+    runMapping(code);
   }, [selectedCode]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (inputCode) {
-      runMapping(inputCode);
-      if (onCodeChange) onCodeChange(inputCode);
-    }
-  };
-
-  const getConfidenceBadge = (conf) => {
-    switch (conf) {
-      case 'HIGH': return <span className="badge badge-high">HIGH CONFIDENCE</span>;
-      case 'MEDIUM': return <span className="badge badge-medium">MEDIUM CONFIDENCE</span>;
-      case 'LOW': return <span className="badge badge-low">LOW CONFIDENCE</span>;
-      default: return <span className="badge badge-none">NO CONFIDENCE</span>;
+    if (inputCode.trim()) {
+      runMapping(inputCode.trim());
+      if (onCodeChange) onCodeChange(inputCode.trim());
     }
   };
 
   return (
     <div>
-      <div className="glass-panel" style={{ padding: '24px', marginBottom: '24px' }}>
+      {/* Search Bar */}
+      <div className="glass-panel" style={{ padding: '20px 24px', marginBottom: '22px' }}>
         <form onSubmit={handleSubmit} className="input-group">
           <input
+            id="mapping-code-input"
             type="text"
             className="form-input"
-            placeholder="Enter NAMASTE code (e.g. SAT-D.8, SAT-D.51) or clinical text..."
+            placeholder="Enter NAMASTE SAT-D code (e.g. SAT-D.8) or clinical text…"
             value={inputCode}
             onChange={(e) => setInputCode(e.target.value)}
+            autoComplete="off"
           />
-          <button type="submit" className="btn" disabled={loading}>
-            <GitMerge size={16} />
-            {loading ? 'Evaluating...' : 'Run Mapping Engine'}
+          <button id="run-mapping-btn" type="submit" className="btn" disabled={loading}>
+            <span style={{ fontSize: 15 }}>⇄</span>
+            {loading ? 'Evaluating…' : 'Run Mapping Engine'}
           </button>
         </form>
       </div>
 
-      {result && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-          {/* Source NAMASTE Concept Box */}
-          <div className="glass-panel" style={{ padding: '24px', borderLeft: '4px solid var(--primary-cyan)' }}>
-            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>
-              Source Concept (AYUSH NAMASTE)
+      {error && (
+        <div style={{ padding: '14px 18px', background: 'rgba(244,63,94,0.08)', border: '1px solid rgba(244,63,94,0.25)', borderRadius: 12, marginBottom: 20, color: 'var(--rose)', fontSize: '0.875rem' }}>
+          ⚠ {error}
+        </div>
+      )}
+
+      {loading && (
+        <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--text-secondary)' }}>
+          <div className="spinner" style={{ width: 28, height: 28, margin: '0 auto 12px auto', borderWidth: 3 }} />
+          <div>Running clinical feature extraction and mapping…</div>
+        </div>
+      )}
+
+      {result && !loading && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+
+          {/* Source NAMASTE Concept */}
+          <div className="glass-panel" style={{ padding: '22px 24px', borderLeft: '3px solid var(--cyan)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+              <span style={{ fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-tertiary)' }}>
+                Source · AYUSH NAMASTE
+              </span>
+              <span className="provenance-badge provenance-local">● LOCAL DEMO</span>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '8px 0' }}>
-              <h2 style={{ fontSize: '1.4rem', fontWeight: 800 }}>{result.namaste.display}</h2>
-              <span className="badge badge-high">{result.namaste.code}</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+              <div>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: '0.8rem', color: 'var(--cyan)', marginBottom: 4 }}>{result.namaste.code}</div>
+                <h2 style={{ fontSize: '1.3rem', fontWeight: 800, letterSpacing: '-0.015em' }}>{result.namaste.display}</h2>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', marginTop: 5 }}>
+                  {result.namaste.definition}
+                </p>
+              </div>
             </div>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem' }}>
-              "{result.namaste.definition}"
-            </p>
           </div>
 
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ display: 'inline-flex', padding: '8px 16px', borderRadius: '20px', background: 'rgba(6, 182, 212, 0.1)', color: 'var(--primary-cyan)', gap: '8px', fontSize: '0.85rem', fontWeight: 600 }}>
-              <ArrowDown size={16} />
-              <span>Deterministic Clinical Feature Extraction & hard rejection evaluation</span>
+          {/* Pipeline connector */}
+          <div className="pipeline-connector">
+            <div className="pipeline-pill">
+              <span>↓</span>
+              Deterministic Clinical Feature Extraction + Hard Rejection Evaluation
             </div>
           </div>
 
-          {/* Mapping Status Disclaimer */}
-          <div className="disclaimer-banner">
-            <AlertTriangle size={18} />
+          {/* Mapping status note */}
+          <div className="disclaimer-banner" style={{ marginBottom: 0 }}>
+            <span style={{ fontSize: 16, flexShrink: 0 }}>⚠</span>
             <div>
               <strong>Mapping Status: {result.mapping_status}</strong> — {result.note}
             </div>
           </div>
 
-          {/* Candidate Mappings List */}
+          {/* Results */}
           {result.count === 0 ? (
-            <div className="glass-panel" style={{ padding: '40px', textAlign: 'center', borderColor: 'rgba(244, 63, 94, 0.3)' }}>
-              <XCircle size={48} color="var(--accent-rose)" style={{ marginBottom: '12px' }} />
-              <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--accent-rose)' }}>NO_CANDIDATE</h3>
-              <p style={{ color: 'var(--text-muted)', marginTop: '6px', maxWidth: '500px', margin: '6px auto 0 auto' }}>
-                No candidate concept passed clinical safety thresholds or explicit hard rejection rules. System avoided producing a false forced mapping.
+            <div className="glass-panel no-candidate-panel">
+              <div className="no-candidate-icon">
+                <span style={{ fontSize: 22, color: 'var(--rose)' }}>✗</span>
+              </div>
+              <div className="no-candidate-title">NO_CANDIDATE</div>
+              <p className="no-candidate-desc">
+                No candidate concept passed clinical safety thresholds or hard rejection rules.
+                The engine avoided producing a false forced mapping — clinical safety preserved.
               </p>
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <h3 style={{ fontSize: '1.1rem', fontWeight: 700 }}>
-                Candidate Matches ({result.count})
-              </h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+                <div className="section-title">Candidate Matches</div>
+                <span className="badge badge-high" style={{ fontSize: '0.7rem' }}>{result.count} found</span>
+                <span className="provenance-badge provenance-who">● OFFICIAL · WHO ICD-11 TM2</span>
+              </div>
 
-              {result.matches.map((match, idx) => (
-                <div key={match.tm2_id} className="glass-panel" style={{ padding: '24px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
+              {result.matches.map((match) => (
+                <div key={match.tm2_id} className="glass-panel match-card">
+                  <div className="match-card-header">
                     <div>
-                      <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600 }}>
-                        TM2 CONCEPT ID: {match.tm2_id} | EQUIVALENCE: {match.equivalence}
+                      <div className="match-tm2-id">
+                        TM2 · {match.tm2_code || match.tm2_id} &nbsp;|&nbsp; equiv: {match.equivalence}
                       </div>
-                      <h3 style={{ fontSize: '1.2rem', fontWeight: 800, marginTop: '4px' }}>
-                        {match.tm2_title}
-                      </h3>
+                      <div className="match-title">{match.tm2_title}</div>
                     </div>
-                    <div style={{ textAlign: 'right' }}>
-                      {getConfidenceBadge(match.confidence)}
-                      <div style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--primary-cyan)', marginTop: '4px' }}>
-                        Score: {match.score}
-                      </div>
+                    <div className="match-right">
+                      <ConfidenceBadge conf={match.confidence} />
+                      <div className="match-score">{match.score}</div>
+                      <div className="match-score-label">score</div>
                     </div>
                   </div>
 
-                  {/* Evidence Section */}
-                  <div style={{ background: 'rgba(10, 14, 23, 0.6)', padding: '16px', borderRadius: '12px', marginTop: '16px' }}>
-                    <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                      Clinical Evidence & Feature Matches
-                    </div>
+                  <ScoreBar score={match.score} />
+
+                  <div className="evidence-panel">
+                    <div className="evidence-panel-label">Clinical Evidence — Matched Features</div>
                     <div className="tag-container">
-                      {match.evidence.anatomy.map(a => (
+                      {(match.evidence?.anatomy || []).map(a => (
                         <span key={a} className="tag tag-anatomy">Anatomy: {a}</span>
                       ))}
-                      {match.evidence.symptoms.map(s => (
+                      {(match.evidence?.symptoms || []).map(s => (
                         <span key={s} className="tag tag-symptom">Symptom: {s}</span>
                       ))}
-                      {match.evidence.quality.map(q => (
-                        <span key={q} className="tag">Quality: {q}</span>
+                      {(match.evidence?.quality || []).map(q => (
+                        <span key={q} className="tag tag-quality">Quality: {q}</span>
                       ))}
-                      {match.evidence.words.map(w => (
+                      {(match.evidence?.words || []).map(w => (
                         <span key={w} className="tag">Word: {w}</span>
                       ))}
+                      {[...(match.evidence?.anatomy || []), ...(match.evidence?.symptoms || []), ...(match.evidence?.quality || []), ...(match.evidence?.words || [])].length === 0 && (
+                        <span className="tag" style={{ color: 'var(--text-tertiary)' }}>No shared feature tokens</span>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -173,14 +213,15 @@ export default function ConceptMappingView({ selectedCode, onCodeChange }) {
             </div>
           )}
 
-          {/* FHIR $translate Payload Drawer */}
+          {/* FHIR $translate Output */}
           {fhirResponse && (
-            <div className="glass-panel" style={{ padding: '24px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                <h3 style={{ fontSize: '1.1rem', fontWeight: 700 }}>FHIR R4 $translate Output (JSON)</h3>
-                <span className="tag" style={{ background: 'rgba(99, 102, 241, 0.2)', color: '#818cf8' }}>
-                  Parameters Resource
-                </span>
+            <div className="glass-panel" style={{ padding: '22px 24px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                <div>
+                  <div className="section-title">FHIR R4 $translate Response</div>
+                  <div className="section-subtitle">Parameters resource · WHO system URI · Real-time output</div>
+                </div>
+                <span className="provenance-badge provenance-algo">● FHIR R4</span>
               </div>
               <pre>{JSON.stringify(fhirResponse, null, 2)}</pre>
             </div>
