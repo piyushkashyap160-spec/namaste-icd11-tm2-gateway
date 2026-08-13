@@ -1,10 +1,18 @@
+const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+
+function buildUrl(path) {
+  if (!API_BASE) return path;
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  return `${API_BASE}${cleanPath}`;
+}
+
 let cachedToken = null;
 
 export async function getAuthToken() {
   if (cachedToken) return cachedToken;
 
   try {
-    const res = await fetch('/api/auth/dev-token', {
+    const res = await fetch(buildUrl('/api/auth/dev-token'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -31,7 +39,7 @@ async function authFetch(url, options = {}) {
     ...options.headers
   };
 
-  const response = await fetch(url, { ...options, headers });
+  const response = await fetch(buildUrl(url), { ...options, headers });
   if (!response.ok) {
     const errorText = await response.text();
     throw new Error(`API Error (${response.status}): ${errorText}`);
