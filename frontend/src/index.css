@@ -814,15 +814,22 @@ pre {
   letter-spacing: 0.02em;
 }
 
-/* FHIR Tester layout */
+/* FHIR Tester layout & Mapping Engine Grid */
 .fhir-layout {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 20px;
 }
 
+.mapping-engine-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.15fr;
+  gap: 20px;
+}
+
 @media (max-width: 960px) {
   .fhir-layout { grid-template-columns: 1fr; }
+  .mapping-engine-grid { grid-template-columns: 1fr; }
 }
 
 /* Test case cards */
